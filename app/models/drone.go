@@ -1,7 +1,8 @@
 package models
 
 import (
-	"github.com/mattn/go/src/time"
+	"time"
+
 	"gobot.io/x/gobot"
 	"gobot.io/x/gobot/platforms/dji/tello"
 	"golang.org/x/sync/semaphore"
@@ -41,39 +42,44 @@ func NewDroneManager() *DroneManager {
 }
 
 func (d *DroneManager) Patrol() {
-	// 制限なしでセマフォを取得できる数は1
-	isAquire := d.patrolSem.TryAcquire(1)
-	if !isAquire {
-		d.patrolQuit <- true
-		d.isPatrolling = false
-		return
-	}
-	defer d.patrolSem.Release(1)
-	d.isPatrolling = true
-	status := 0
-	t := time.NewTicker(3 * time.Second)
-	for {
-		select {
-		case <-t.C:
-			d.Hover()
-			switch status {
-			case 1:
-				d.Forward(d.Speed)
-			case 2:
-				d.Right(d.Speed)
-			case 3:
-				d.Backward(d.Speed)
-			case 4:
-				d.Left(d.Speed)
-			case 5:
-				status = 0
-			}
-			status++
-		case <-d.patrolQuit:
-			t.Stop()
-			d.Hover()
+	go func() {
+		// 制限なしでセマフォを取得できる数は1
+		isAquire := d.patrolSem.TryAcquire(1)
+		if !isAquire {
+			d.patrolQuit <- true
 			d.isPatrolling = false
 			return
 		}
-	}
+		defer d.patrolSem.Release(1)
+		d.isPatrolling = true
+		status := 0
+		t := time.NewTicker(3 * time.Second)
+		for {
+			select {
+			// tがクロックされた時，今回は3秒ごと
+			case <-t.C:
+				d.Hover()
+				switch status {
+				case 1:
+					d.Forward(d.Speed)
+				case 2:
+					d.Right(d.Speed)
+				case 3:
+					d.Backward(d.Speed)
+				case 4:
+					d.Left(d.Speed)
+				case 5:
+					// 次，1にするため
+					status = 0
+				}
+				status++
+			case <-d.patrolQuit:
+				// 2回目にPatrol()を呼び出すと，セマフォを取得できないのでif !isAquireでdroneが定石する
+				t.Stop()
+				d.Hover()
+				d.isPatrolling = false
+				return
+			}
+		}
+	}()
 }
